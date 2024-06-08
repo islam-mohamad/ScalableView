@@ -1,11 +1,7 @@
 package com.xische.scalableview.adapter
 
-import android.util.Log
 import android.view.LayoutInflater
-import android.view.View
 import android.view.ViewGroup
-import android.view.animation.AlphaAnimation
-import android.view.animation.AnimationUtils
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.xische.scalableview.R
@@ -13,15 +9,14 @@ import com.xische.scalableview.databinding.ActionViewBinding
 import com.xische.scalableview.model.ItemsModel
 
 
-class ItemsAdapter( val onClick: (ItemsModel) -> Unit) :
-    RecyclerView.Adapter<ItemsAdapter.ViewHolder>() {
+class ItemsAdapter : RecyclerView.Adapter<ItemsAdapter.ViewHolder>() {
 
-        var  itemList: List<ItemsModel> = listOf()
+    var itemList: List<ItemsModel> = listOf()
 
     class ViewHolder(private val binding: ActionViewBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
-        fun bind(item: ItemsModel, onClick: View.OnClickListener) {
+        fun bind(item: ItemsModel) {
             binding.tvTitle.text = "${item.id}- ${item.title}"
             binding.tvSubTitle.text = item.subTitle
             binding.ivTile.setImageDrawable(
@@ -30,8 +25,6 @@ class ItemsAdapter( val onClick: (ItemsModel) -> Unit) :
                     R.drawable.ic_action_file
                 )
             )
-
-            binding.clCell.setOnClickListener(onClick)
         }
     }
 
@@ -41,9 +34,7 @@ class ItemsAdapter( val onClick: (ItemsModel) -> Unit) :
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.bind(itemList[position]) {
-            onClick(itemList[position])
-        }
+        holder.bind(itemList[position])
     }
 
     override fun getItemCount(): Int {

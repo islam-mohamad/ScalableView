@@ -2,26 +2,25 @@ package com.xische.scalableview
 
 import android.content.Context
 import android.util.AttributeSet
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
-import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
-import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
 import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_HALF_EXPANDED
 import com.xische.scalableview.adapter.ItemsAdapter
 import com.xische.scalableview.databinding.XischeBottomsheetBinding
-import com.xische.scalableview.utils.StackLayoutManagerDep
+import com.xische.scalableview.utils.Align
+import com.xische.scalableview.utils.Config
+import com.xische.scalableview.utils.StackLayoutManager
 
 class ScalableView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 ) : FrameLayout(context, attrs, defStyleAttr) {
 
     private var _topView: View? = null
-    private var lm: StackLayoutManagerDep? = null
-    private var latBottomSheetState = STATE_HALF_EXPANDED
+    private var lm: StackLayoutManager? = null
 
     private var binding: XischeBottomsheetBinding? =
         XischeBottomsheetBinding.inflate(LayoutInflater.from(context), this, true)
@@ -34,13 +33,7 @@ class ScalableView @JvmOverloads constructor(
     init {
         bottomSheetBehavior?.addBottomSheetCallback(object :
             BottomSheetBehavior.BottomSheetCallback() {
-            override fun onStateChanged(bottomSheet: View, newState: Int) {
-                if (newState == BottomSheetBehavior.STATE_DRAGGING) {
-                    lm?.setLayoutBehaviour(isCollapse = latBottomSheetState == STATE_COLLAPSED)
-                } else if (newState == STATE_EXPANDED || newState == STATE_COLLAPSED) {
-                    latBottomSheetState = newState
-                }
-            }
+            override fun onStateChanged(bottomSheet: View, newState: Int) {}
 
             override fun onSlide(bottomSheet: View, slideOffset: Float) {
                 val params = binding?.rv?.layoutParams
@@ -58,7 +51,15 @@ class ScalableView @JvmOverloads constructor(
     }
 
     fun setAdapter(adapter: ItemsAdapter) = binding?.rv?.let {
-        lm = StackLayoutManagerDep(this.context, it)
+        lm = StackLayoutManager(Config().apply {
+            space = 50
+            maxStackCount = 3
+            initialStackCount = 2
+            scaleRatio = 0.4f
+            secondaryScale = 1f
+            parallex = 2f
+            align = Align.TOP
+        }, it)
         it.adapter = adapter
         it.layoutManager = lm
         it.layoutParams.width = LayoutParams.MATCH_PARENT
@@ -66,16 +67,17 @@ class ScalableView @JvmOverloads constructor(
         setupBottomSheetInitialState(it)
     }
 
-    private fun setupBottomSheetInitialState(topView: View) = binding?.run {
-        topView.viewTreeObserver.addOnGlobalLayoutListener(object :
+    private fun setupBottomSheetInitialState(recyclerView: RecyclerView) = binding?.run {
+        recyclerView.viewTreeObserver.addOnGlobalLayoutListener(object :
             ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
-                ((parent.measuredHeight - topView.measuredHeight).toFloat() / parent.measuredHeight).also { expandRatio ->
+                ((recyclerView.rootView.height.toFloat() - recyclerView.layoutParams.height.toFloat()) / recyclerView.rootView.height.toFloat()).also { expandRatio ->
                     bottomSheetBehavior?.halfExpandedRatio =
                         if (expandRatio <= 0F || expandRatio >= 1) 0.1F else expandRatio
                 }
-                topView.viewTreeObserver.removeOnGlobalLayoutListener(this)
                 bottomSheetBehavior?.state = STATE_HALF_EXPANDED
+                recyclerView.viewTreeObserver.removeOnGlobalLayoutListener(this)
+
             }
         })
     }

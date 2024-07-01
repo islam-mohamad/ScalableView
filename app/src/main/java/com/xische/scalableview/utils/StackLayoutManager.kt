@@ -1,676 +1,418 @@
-package com.xische.scalableview.utils;
+package com.xische.scalableview.utils
 
-import static androidx.recyclerview.widget.DiffUtil.DiffResult.NO_POSITION;
-import static com.xische.scalableview.utils.Align.BOTTOM;
-import static com.xische.scalableview.utils.Align.LEFT;
-import static com.xische.scalableview.utils.Align.RIGHT;
-import static com.xische.scalableview.utils.Align.TOP;
-
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.ObjectAnimator;
-import android.util.Log;
-import android.view.MotionEvent;
-import android.view.VelocityTracker;
-import android.view.View;
-import android.view.ViewConfiguration;
-import android.view.ViewGroup;
-
-import androidx.recyclerview.widget.RecyclerView;
-
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-
-public class StackLayoutManager extends RecyclerView.LayoutManager {
-
-    private static final String TAG = "StackLayoutManager";
-
-    //the space unit for the stacked item
-    private int mSpace = 60;
-    /**
-     * the offset unit,deciding current position(the sum of  {@link #mItemWidth} and {@link #mSpace})
-     */
-    private int mUnit;
-    //item width
-    private int mItemWidth;
-    private int mItemHeight;
-    //the counting variable ,record the total offset including parallex
-    private int mTotalOffset;
-    //record the total offset without parallex
-    private int mRealOffset;
-    private ObjectAnimator animator;
-    private int animateValue;
-    private int duration = 300;
-    private RecyclerView.Recycler recycler;
-    private int lastAnimateValue;
-    //the max stacked item count;
-    private int maxStackCount = 4;
-    //initial stacked item
-    private int initialStackCount = 4;
-    private float secondaryScale = 0.8f;
-    private float scaleRatio = 0.4f;
-    private float parallex = 1f;
-    private int initialOffset;
-    private boolean initial;
-    private int mMinVelocityX;
-    private VelocityTracker mVelocityTracker = VelocityTracker.obtain();
-    private int pointerId;
-    private Align direction = LEFT;
-    private RecyclerView mRV;
-    private Method sSetScrollState;
-    private int mPendingScrollPosition = NO_POSITION;
-    private int previousWidth = -1;
-    private int previousHeight = -1;
-    private final RecyclerView recyclerView;
-    private boolean isInitialHeightSet = false;
-    public boolean enableResizeAnimation = false;
-    private int totalHeight = 0;
-
-    public StackLayoutManager(Config config, RecyclerView recyclerView) {
-        this(recyclerView);
-        this.maxStackCount = config.maxStackCount;
-        this.mSpace = config.space;
-        this.initialStackCount = config.initialStackCount;
-        this.secondaryScale = config.secondaryScale;
-        this.scaleRatio = config.scaleRatio;
-        this.direction = config.align;
-        this.parallex = config.parallex;
-    }
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ObjectAnimator
+import android.annotation.SuppressLint
+import android.util.Log
+import android.view.MotionEvent
+import android.view.VelocityTracker
+import android.view.View
+import android.view.ViewConfiguration
+import androidx.recyclerview.widget.DiffUtil.DiffResult
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.RecyclerView.OnFlingListener
+import androidx.recyclerview.widget.RecyclerView.Recycler
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
+import kotlin.math.abs
 
 
-    @SuppressWarnings("unused")
-    public StackLayoutManager(RecyclerView recyclerView) {
-        this.recyclerView = recyclerView;
-        setAutoMeasureEnabled(true);
-    }
+class StackLayoutManager(private val recyclerView: RecyclerView) :
+    LinearLayoutManager(recyclerView.context) {
 
-    @Override
-    public boolean isAutoMeasureEnabled() {
-        return true;
-    }
-
-    @Override
-    public void onLayoutChildren(RecyclerView.Recycler recycler, RecyclerView.State state) {
-        if (getItemCount() <= 0) return;
-        this.recycler = recycler;
-
-        // Measure the anchor view to get item dimensions
-        View anchorView = recycler.getViewForPosition(0);
-        measureChildWithMargins(anchorView, 0, 0);
-        mItemWidth = anchorView.getMeasuredWidth();
-        mItemHeight = anchorView.getMeasuredHeight();
-        if (canScrollHorizontally()) {
-            mUnit = mItemWidth + mSpace;
-        } else {
-            mUnit = mItemHeight + mSpace;
+    private var mSpace = 60
+    private var mUnit = 0
+    private var mItemWidth = 0
+    private var mItemHeight = 0
+    private var mTotalOffset = 0
+    private var animator: ObjectAnimator? = null
+    var animateValue: Int = 0
+        set(value) {
+            field = value
+            val dy = field - lastAnimateValue
+            fill(recycler, dy, false)
+            lastAnimateValue = value
         }
-        setInitialHeight();
+    private val duration = 300
+    private var recycler: Recycler? = null
+    private var lastAnimateValue = 0
+    private var maxStackCount = 4
+    private var initialStackCount = 4
+    private var secondaryScale = 0.8f
+    private var scaleRatio = 0.4f
+    private var parallex = 1f
+    private var initialOffset = 0
+    private var initial = false
+    private var mMinVelocityX = 0
+    private val mVelocityTracker: VelocityTracker = VelocityTracker.obtain()
+    private var pointerId = 0
+    private var mRV: RecyclerView? = null
+    private var sSetScrollState: Method? = null
+    private var mPendingScrollPosition = DiffResult.NO_POSITION
+    private var previousWidth = -1
+    private var previousHeight = -1
+    private var isInitialHeightSet = false
+    private var enableResizeAnimation: Boolean = false
+    private var totalHeight = 0
 
-        initialOffset = resolveInitialOffset();
-        mMinVelocityX = ViewConfiguration.get(anchorView.getContext()).getScaledMinimumFlingVelocity();
+    constructor(config: Config, recyclerView: RecyclerView) : this(recyclerView) {
+        this.maxStackCount = config.maxStackCount
+        this.mSpace = config.space
+        this.initialStackCount = config.initialStackCount
+        this.secondaryScale = config.secondaryScale
+        this.scaleRatio = config.scaleRatio
+        this.parallex = config.parallax
+    }
 
-        // Handle initial layout and resizing
-        fill(recycler, 0);
+    override fun isAutoMeasureEnabled(): Boolean {
+        return true
+    }
 
-        // Detect RecyclerView resize
-        if ((initial || isRecyclerViewResized())) {
-            simulateScrollOnResize();
-            initial = true;
+    override fun onLayoutChildren(recycler: Recycler, state: RecyclerView.State) {
+        if (itemCount <= 0) return
+        this.recycler = recycler
+
+        try {
+            val anchorView = recycler.getViewForPosition(0)
+            measureChildWithMargins(anchorView, 0, 0)
+            mItemWidth = anchorView.measuredWidth
+            mItemHeight = anchorView.measuredHeight
+            mUnit = if (canScrollHorizontally()) mItemWidth + mSpace else mItemHeight + mSpace
+            setInitialHeight()
+
+            initialOffset = resolveInitialOffset()
+            mMinVelocityX = ViewConfiguration.get(anchorView.context).scaledMinimumFlingVelocity
+
+            fill(recycler, 0)
+
+            if ((initial || isRecyclerViewResized)) {
+                simulateScrollOnResize()
+                initial = true
+            }
+        } catch (ignored: Exception) {
         }
+
     }
 
-    private boolean isRecyclerViewResized() {
-        // Implement logic to detect if the RecyclerView size has changed
-        int newWidth = getWidth();
-        int newHeight = getHeight();
-        boolean resized = newWidth != previousWidth || newHeight != previousHeight;
-        previousWidth = newWidth;
-        previousHeight = newHeight;
-        return resized;
-    }
+    private val isRecyclerViewResized: Boolean
+        get() {
+            val newWidth = width
+            val newHeight = height
+            val resized = newWidth != previousWidth || newHeight != previousHeight
+            previousWidth = newWidth
+            previousHeight = newHeight
+            return resized
+        }
 
-    private void simulateScrollOnResize() {
-        // Determine the direction of scroll based on the resize type (expand or collapse)
-        int scrollDelta = calculateScrollDelta();
+    private fun simulateScrollOnResize() {
+        val scrollDelta = calculateScrollDelta()
         if (scrollDelta != 0) {
             if (enableResizeAnimation) {
                 if (canScrollHorizontally()) {
-                    scrollHorizontallyBy(scrollDelta, recycler, null);
+                    scrollHorizontallyBy(scrollDelta, recycler, null)
                 } else {
-                    scrollVerticallyBy(scrollDelta, recycler, null);
+                    scrollVerticallyBy(scrollDelta, recycler!!, null)
                 }
             } else {
-                enableResizeAnimation = true;
+                enableResizeAnimation = true
                 if (canScrollHorizontally()) {
-                    scrollHorizontallyBy(totalHeight + mSpace, recycler, null);
+                    scrollHorizontallyBy(totalHeight + mSpace, recycler, null)
                 } else {
-                    scrollVerticallyBy(totalHeight + (maxStackCount * mSpace), recycler, null);
+                    scrollVerticallyBy(
+                        totalHeight + (maxStackCount * mSpace), recycler!!, null
+                    )
                 }
             }
         }
     }
 
-    private int calculateScrollDelta() {
-        // Calculate the appropriate scroll amount based on the resize type
-        int newWidth = getWidth();
-        int newHeight = getHeight();
+    private fun calculateScrollDelta(): Int {
+        val newWidth = width
+        val newHeight = height
         if (previousWidth == -1 || previousHeight == -1) {
-            previousWidth = newWidth;
-            previousHeight = newHeight;
-            return 0;
+            previousWidth = newWidth
+            previousHeight = newHeight
+            return 0
         }
-        int delta = 0;
-        if (canScrollHorizontally()) {
-            delta = previousWidth - newWidth;
+        val delta: Int = if (canScrollHorizontally()) {
+            previousWidth - newWidth
         } else {
-            delta = previousHeight - newHeight;
+            previousHeight - newHeight
         }
-        previousWidth = newWidth;
-        previousHeight = newHeight;
-        return delta;
+        previousWidth = newWidth
+        previousHeight = newHeight
+        return delta
     }
 
-    //we need take direction into account when calc initialOffset
-    private int resolveInitialOffset() {
-        int offset = initialStackCount * mUnit;
-        if (mPendingScrollPosition != NO_POSITION) {
-            offset = mPendingScrollPosition * mUnit;
-            mPendingScrollPosition = NO_POSITION;
+    private fun resolveInitialOffset(): Int {
+        var offset = initialStackCount * mUnit
+        if (mPendingScrollPosition != DiffResult.NO_POSITION) {
+            offset = mPendingScrollPosition * mUnit
+            mPendingScrollPosition = DiffResult.NO_POSITION
         }
-
-        if (direction == LEFT)
-            return offset;
-        if (direction == RIGHT)
-            return -offset;
-        if (direction == TOP)
-            return offset;
-        else return offset;
+        return offset
     }
 
-    @Override
-    public void onLayoutCompleted(RecyclerView.State state) {
-        super.onLayoutCompleted(state);
-        if (getItemCount() <= 0)
-            return;
+    override fun onLayoutCompleted(state: RecyclerView.State) {
+        super.onLayoutCompleted(state)
+        if (itemCount <= 0) return
         if (!initial) {
-            fill(recycler, initialOffset, false);
-            initial = true;
+            fill(recycler, initialOffset, false)
+            initial = true
         }
     }
 
-    private void setInitialHeight() {
-        if (isInitialHeightSet)
-            return;
-        totalHeight = mItemHeight + (maxStackCount * mSpace) + mSpace;
-        ViewGroup.LayoutParams params = recyclerView.getLayoutParams();
-        params.height = totalHeight;
-        recyclerView.setLayoutParams(params);
-        isInitialHeightSet = true;
+    private fun setInitialHeight() {
+        if (isInitialHeightSet) return
+        totalHeight = mItemHeight + (maxStackCount * mSpace) + mSpace
+        val params = recyclerView.layoutParams
+        params.height = totalHeight
+        recyclerView.layoutParams = params
+        isInitialHeightSet = true
     }
 
-    @Override
-    public void onAdapterChanged(RecyclerView.Adapter oldAdapter, RecyclerView.Adapter newAdapter) {
-        initial = false;
-        mTotalOffset = mRealOffset = 0;
+    override fun onAdapterChanged(
+        oldAdapter: RecyclerView.Adapter<*>?, newAdapter: RecyclerView.Adapter<*>?
+    ) {
+        initial = false
+        mTotalOffset = 0
     }
 
-    /**
-     * the magic function :).all the work including computing ,recycling,and layout is done here
-     *
-     * @param recycler ...
-     */
-    private int fill(RecyclerView.Recycler recycler, int dy, boolean apply) {
-        int delta = direction.layoutDirection * dy;
-        // multiply the parallex factor
-        if (apply)
-            delta = (int) (delta * parallex);
-        if (direction == LEFT)
-            return fillFromLeft(recycler, delta);
-        if (direction == RIGHT)
-            return fillFromRight(recycler, delta);
-        if (direction == TOP)
-            return fillFromTop(recycler, delta);
-        else return dy;//bottom alignment is not necessary,we don't support that
+    private fun fill(recycler: Recycler?, dy: Int, apply: Boolean): Int {
+        var delta = dy
+        if (apply) delta = (delta * parallex).toInt()
+        return fillFromTop(recycler, -delta)
     }
 
-    public int fill(RecyclerView.Recycler recycler, int dy) {
-        return fill(recycler, dy, true);
+    private fun fill(recycler: Recycler?, dy: Int): Int {
+        return fill(recycler, dy, true)
     }
 
-    private int fillFromTop(RecyclerView.Recycler recycler, int dy) {
-        if (mTotalOffset + dy < 0 || (mTotalOffset + dy + 0f) / mUnit > getItemCount() - 1)
-            return 0;
-        detachAndScrapAttachedViews(recycler);
-        mTotalOffset += direction.layoutDirection * dy;
-        int count = getChildCount();
-        //removeAndRecycle  views
-        for (int i = 0; i < count; i++) {
-            View child = getChildAt(i);
-            if (recycleVertically(child, dy))
-                removeAndRecycleView(child, recycler);
+    private fun fillFromTop(recycler: Recycler?, dy: Int): Int {
+        if (mTotalOffset + dy < 0 || (mTotalOffset + dy + 0f) / mUnit > itemCount - 1) return 0
+        detachAndScrapAttachedViews(recycler!!)
+        mTotalOffset += dy
+        val count = childCount
+        for (i in 0 until count) {
+            val child = getChildAt(i)
+            if (recycleVertically(child, dy)) removeAndRecycleView(child!!, recycler)
         }
-        int currPos = mTotalOffset / mUnit;
-        int leavingSpace = getHeight() - (left(currPos) + mUnit);
-        int itemCountAfterBaseItem = leavingSpace / mUnit + 2;
-        int e = currPos + itemCountAfterBaseItem;
-
-        int start = currPos - maxStackCount >= 0 ? currPos - maxStackCount : 0;
-        int end = e >= getItemCount() ? getItemCount() - 1 : e;
-
-        int left = getWidth() / 2 - mItemWidth / 2;
-        //layout views
-        for (int i = start; i <= end; i++) {
-            View view = recycler.getViewForPosition(i);
-
-            float scale = scale(i);
-            float alpha = alpha(i);
-
-            addView(view);
-            measureChildWithMargins(view, 0, 0);
-            int top = (int) (left(i) - (1 - scale) * view.getMeasuredHeight() / 2);
-            int right = view.getMeasuredWidth() + left;
-            int bottom = view.getMeasuredHeight() + top;
-            layoutDecoratedWithMargins(view, left, top, right, bottom);
-            view.setAlpha(alpha);
-            view.setScaleY(scale);
-            view.setScaleX(scale);
+        val currPos = mTotalOffset / mUnit
+        val leavingSpace = height - (left(currPos) + mUnit)
+        val itemCountAfterBaseItem = leavingSpace / mUnit + 2
+        val e = currPos + itemCountAfterBaseItem
+        val start = if (currPos - maxStackCount >= 0) currPos - maxStackCount else 0
+        val end = if (e >= itemCount) itemCount - 1 else e
+        val left = width / 2 - mItemWidth / 2
+        for (i in start..end) {
+            val view = recycler.getViewForPosition(i)
+            val scale = scale(i)
+            val alpha = alpha(i)
+            addView(view)
+            measureChildWithMargins(view, 0, 0)
+            val top = (left(i) - (1 - scale) * view.measuredHeight / 2).toInt()
+            val right = view.measuredWidth + left
+            val bottom = view.measuredHeight + top
+            layoutDecoratedWithMargins(view, left, top, right, bottom)
+            view.alpha = alpha
+            view.scaleY = scale
+            view.scaleX = scale
         }
-
-        return dy;
+        return dy
     }
 
-    private int fillFromRight(RecyclerView.Recycler recycler, int dy) {
-
-        if (mTotalOffset + dy < 0 || (mTotalOffset + dy + 0f) / mUnit > getItemCount() - 1)
-            return 0;
-        detachAndScrapAttachedViews(recycler);
-        mTotalOffset += dy;
-        int count = getChildCount();
-        //removeAndRecycle  views
-        for (int i = 0; i < count; i++) {
-            View child = getChildAt(i);
-            if (recycleHorizontally(child, dy))
-                removeAndRecycleView(child, recycler);
+    private val mTouchListener = View.OnTouchListener { v, event ->
+        mVelocityTracker.addMovement(event)
+        if (event.action == MotionEvent.ACTION_DOWN) {
+            if (animator != null && animator!!.isRunning) animator!!.cancel()
+            pointerId = event.getPointerId(0)
         }
-
-
-        int currPos = mTotalOffset / mUnit;
-        int leavingSpace = left(currPos);
-        int itemCountAfterBaseItem = leavingSpace / mUnit + 2;
-        int e = currPos + itemCountAfterBaseItem;
-
-        int start = currPos - maxStackCount <= 0 ? 0 : currPos - maxStackCount;
-        int end = e >= getItemCount() ? getItemCount() - 1 : e;
-
-        //layout view
-        for (int i = start; i <= end; i++) {
-            View view = recycler.getViewForPosition(i);
-
-            float scale = scale(i);
-            float alpha = alpha(i);
-
-            addView(view);
-            measureChildWithMargins(view, 0, 0);
-            int left = (int) (left(i) - (1 - scale) * view.getMeasuredWidth() / 2);
-            int top = 0;
-            int right = left + view.getMeasuredWidth();
-            int bottom = view.getMeasuredHeight();
-
-            layoutDecoratedWithMargins(view, left, top, right, bottom);
-            view.setAlpha(alpha);
-            view.setScaleY(scale);
-            view.setScaleX(scale);
-        }
-
-        return dy;
-    }
-
-    private int fillFromLeft(RecyclerView.Recycler recycler, int dy) {
-        if (mTotalOffset + dy < 0 || (mTotalOffset + dy + 0f) / mUnit > getItemCount() - 1)
-            return 0;
-        detachAndScrapAttachedViews(recycler);
-        mTotalOffset += direction.layoutDirection * dy;
-        int count = getChildCount();
-        //removeAndRecycle  views
-        for (int i = 0; i < count; i++) {
-            View child = getChildAt(i);
-            if (recycleHorizontally(child, dy))
-                removeAndRecycleView(child, recycler);
-        }
-
-
-        int currPos = mTotalOffset / mUnit;
-        int leavingSpace = getWidth() - (left(currPos) + mUnit);
-        int itemCountAfterBaseItem = leavingSpace / mUnit + 2;
-        int e = currPos + itemCountAfterBaseItem;
-
-        int start = currPos - maxStackCount >= 0 ? currPos - maxStackCount : 0;
-        int end = e >= getItemCount() ? getItemCount() - 1 : e;
-
-        //layout view
-        for (int i = start; i <= end; i++) {
-            View view = recycler.getViewForPosition(i);
-
-            float scale = scale(i);
-            float alpha = alpha(i);
-
-            addView(view);
-            measureChildWithMargins(view, 0, 0);
-            int left = (int) (left(i) - (1 - scale) * view.getMeasuredWidth() / 2);
-            int top = 0;
-            int right = left + view.getMeasuredWidth();
-            int bottom = top + view.getMeasuredHeight();
-            layoutDecoratedWithMargins(view, left, top, right, bottom);
-            view.setAlpha(alpha);
-            view.setScaleY(scale);
-            view.setScaleX(scale);
-        }
-
-        return dy;
-    }
-
-    private View.OnTouchListener mTouchListener = new View.OnTouchListener() {
-        @Override
-        public boolean onTouch(View v, MotionEvent event) {
-            mVelocityTracker.addMovement(event);
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                if (animator != null && animator.isRunning())
-                    animator.cancel();
-                pointerId = event.getPointerId(0);
-
+        if (event.action == MotionEvent.ACTION_UP) {
+            if (v.isPressed) v.performClick()
+            mVelocityTracker.computeCurrentVelocity(1000, 14000f)
+            val xVelocity = mVelocityTracker.getXVelocity(pointerId)
+            val o = mTotalOffset % mUnit
+            val scrollX: Int
+            if (abs(xVelocity.toDouble()) < mMinVelocityX && o != 0) {
+                scrollX = if (o >= mUnit / 2) mUnit - o
+                else -o
+                val dur = (abs(((scrollX + 0f) / mUnit).toDouble()) * duration).toInt()
+                Log.i(TAG, "onTouch: ======BREW===")
+                brewAndStartAnimator(dur, scrollX)
             }
-            if (event.getAction() == MotionEvent.ACTION_UP) {
-                if (v.isPressed()) v.performClick();
-                mVelocityTracker.computeCurrentVelocity(1000, 14000);
-                float xVelocity = mVelocityTracker.getXVelocity(pointerId);
-                int o = mTotalOffset % mUnit;
-                int scrollX;
-                if (Math.abs(xVelocity) < mMinVelocityX && o != 0) {
-                    if (o >= mUnit / 2)
-                        scrollX = mUnit - o;
-                    else scrollX = -o;
-                    int dur = (int) (Math.abs((scrollX + 0f) / mUnit) * duration);
-                    Log.i(TAG, "onTouch: ======BREW===");
-                    brewAndStartAnimator(dur, scrollX);
-                }
-            }
-            return false;
         }
+        false
+    }
 
-    };
-
-    private RecyclerView.OnFlingListener mOnFlingListener = new RecyclerView.OnFlingListener() {
-        @Override
-        public boolean onFling(int velocityX, int velocityY) {
-            int o = mTotalOffset % mUnit;
-            int s = mUnit - o;
-            int scrollX;
-            int vel = absMax(velocityX, velocityY);
-            if (vel * direction.layoutDirection > 0) {
-                scrollX = s;
-            } else
-                scrollX = -o;
-            int dur = computeSettleDuration(Math.abs(scrollX), Math.abs(vel));
-            brewAndStartAnimator(dur, scrollX);
-            setScrollStateIdle();
-            return true;
+    private val mOnFlingListener: OnFlingListener = object : OnFlingListener() {
+        override fun onFling(velocityX: Int, velocityY: Int): Boolean {
+            val o = mTotalOffset % mUnit
+            val s = mUnit - o
+            val scrollX: Int
+            val vel = absMax(velocityX, velocityY)
+            scrollX = if (vel > 0) {
+                s
+            } else -o
+            val dur = computeSettleDuration(
+                abs(scrollX.toDouble()).toInt(), abs(vel.toDouble()).toFloat()
+            )
+            brewAndStartAnimator(dur, scrollX)
+            setScrollStateIdle()
+            return true
         }
-    };
-
-    private int absMax(int a, int b) {
-        if (Math.abs(a) > Math.abs(b))
-            return a;
-        else return b;
     }
 
-    @Override
-    public void onAttachedToWindow(RecyclerView view) {
-        super.onAttachedToWindow(view);
-        mRV = view;
-        //check when raise finger and settle to the appropriate item
-        view.setOnTouchListener(mTouchListener);
-
-        view.setOnFlingListener(mOnFlingListener);
+    init {
+        orientation = RecyclerView.VERTICAL
     }
 
-    private int computeSettleDuration(int distance, float xvel) {
-        float sWeight = 0.5f * distance / mUnit;
-        float velWeight = xvel > 0 ? 0.5f * mMinVelocityX / xvel : 0;
-
-        return (int) ((sWeight + velWeight) * duration);
+    private fun absMax(a: Int, b: Int): Int {
+        return if (abs(a.toDouble()) > abs(b.toDouble())) a
+        else b
     }
 
-    private void brewAndStartAnimator(int dur, int finalXorY) {
-        animator = ObjectAnimator.ofInt(StackLayoutManager.this, "animateValue", 0, finalXorY);
-        animator.setDuration(dur);
-        animator.start();
-        animator.addListener(new AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(Animator animation) {
-                lastAnimateValue = 0;
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onAttachedToWindow(view: RecyclerView) {
+        super.onAttachedToWindow(view)
+        mRV = view
+        view.setOnTouchListener(mTouchListener)
+        view.onFlingListener = mOnFlingListener
+    }
+
+    private fun computeSettleDuration(distance: Int, xvel: Float): Int {
+        val sWeight = 0.5f * distance / mUnit
+        val velWeight = if (xvel > 0) 0.5f * mMinVelocityX / xvel else 0f
+        return ((sWeight + velWeight) * duration).toInt()
+    }
+
+    private fun brewAndStartAnimator(dur: Int, finalXorY: Int) {
+        animator =
+            ObjectAnimator.ofInt(this@StackLayoutManager, "animateValue", 0, finalXorY).apply {
+                duration = dur.toLong()
+                start()
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        lastAnimateValue = 0
+                    }
+
+                    override fun onAnimationCancel(animation: Animator) {
+                        lastAnimateValue = 0
+                    }
+                })
             }
-
-            @Override
-            public void onAnimationCancel(Animator animation) {
-                lastAnimateValue = 0;
-            }
-        });
     }
 
-    /******************************precise math method*******************************/
-    private float alpha(int position) {
-        float alpha;
-        int currPos = mTotalOffset / mUnit;
-        float n = (mTotalOffset + .0f) / mUnit;
-        if (position > currPos)
-            alpha = 1.0f;
+    private fun alpha(position: Int): Float {
+        val alpha: Float
+        val currPos = mTotalOffset / mUnit
+        val n = (mTotalOffset + .0f) / mUnit
+        alpha = if (position > currPos) 1.0f
         else {
-            //temporary linear map,barely ok
-            alpha = 1 - (n - position) / maxStackCount;
+            1 - (n - position) / maxStackCount
         }
-        //for precise checking,oh may be kind of dummy
-        return alpha <= 0.001f ? 0 : alpha;
+        return if (alpha <= 0.001f) 0f else alpha
     }
 
-    private float scale(int position) {
-        switch (direction) {
-            default:
-            case LEFT:
-            case RIGHT:
-                return scaleDefault(position);
-        }
-    }
+    private fun scale(position: Int): Float {
+        val scale: Float
+        val currPos = this.mTotalOffset / mUnit
+        val n = (mTotalOffset + .0f) / mUnit
+        val x = n - currPos
+        scale = if (position >= currPos) {
+            when (position) {
+                currPos -> 1 - scaleRatio * (n - currPos) / maxStackCount
+                currPos + 1 -> {
+                    secondaryScale + (if (x > 0.5f) 1 - secondaryScale else 2 * (1 - secondaryScale) * x)
+                }
 
-    private float scaleDefault(int position) {
-        float scale;
-        int currPos = this.mTotalOffset / mUnit;
-        float n = (mTotalOffset + .0f) / mUnit;
-        float x = n - currPos;
-        // position >= currPos+1;
-        if (position >= currPos) {
-            if (position == currPos)
-                scale = 1 - scaleRatio * (n - currPos) / maxStackCount;
-            else if (position == currPos + 1)
-            //let the item's (index:position+1) scale be 1 when the item slide 1/2 mUnit,
-            // this have better visual effect
-            {
-//                scale = 0.8f + (0.4f * x >= 0.2f ? 0.2f : 0.4f * x);
-                scale = secondaryScale + (x > 0.5f ? 1 - secondaryScale : 2 * (1 - secondaryScale) * x);
-            } else scale = secondaryScale;
-        } else {//position <= currPos
-            if (position < currPos - maxStackCount)
-                scale = 0f;
+                else -> secondaryScale
+            }
+        } else {
+            if (position < currPos - maxStackCount) 0f
             else {
-                scale = 1f - scaleRatio * (n - currPos + currPos - position) / maxStackCount;
+                1f - scaleRatio * (n - currPos + currPos - position) / maxStackCount
             }
         }
-        Log.e("asd", "scale" + scale);
-        return scale;
+        return scale
     }
 
-    /**
-     * @param position the index of the item in the adapter
-     * @return the accurate left position for the given item
-     */
-    private int left(int position) {
-
-
-        int currPos = mTotalOffset / mUnit;
-        int tail = mTotalOffset % mUnit;
-        float n = (mTotalOffset + .0f) / mUnit;
-        float x = n - currPos;
-
-        switch (direction) {
-            default:
-            case LEFT:
-            case TOP:
-                //from left to right or top to bottom
-                //these two scenario are actually same
-                return ltr(position, currPos, tail, x);
-            case RIGHT:
-                return rtl(position, currPos, tail, x);
-        }
+    private fun left(position: Int): Int {
+        val currPos = mTotalOffset / mUnit
+        val tail = mTotalOffset % mUnit
+        val n = (mTotalOffset + .0f) / mUnit
+        val x = n - currPos
+        return ltr(position, currPos, tail, x)
     }
 
-    /**
-     * @param position ..
-     * @param currPos  ..
-     * @param tail     .. change
-     * @param x        ..
-     * @return the left position for given item
-     */
-    private int rtl(int position, int currPos, int tail, float x) {
-        //虽然是做对称变换，但是必须考虑到scale给 对称变换带来的影响
-        float scale = scale(position);
-        int ltr = ltr(position, currPos, tail, x);
-        return (int) (getWidth() - ltr - (mItemWidth) * scale);
-    }
-
-    private int ltr(int position, int currPos, int tail, float x) {
-        int left;
+    private fun ltr(position: Int, currPos: Int, tail: Int, x: Float): Int {
+        var left: Int
 
         if (position <= currPos) {
-
-            if (position == currPos) {
-                left = (int) (mSpace * (maxStackCount - x));
+            left = if (position == currPos) {
+                (mSpace * (maxStackCount - x)).toInt()
             } else {
-                left = (int) (mSpace * (maxStackCount - x - (currPos - position)));
-
+                (mSpace * (maxStackCount - x - (currPos - position))).toInt()
             }
         } else {
-            if (position == currPos + 1)
-                left = mSpace * maxStackCount + mUnit - tail;
+            if (position == currPos + 1) left = mSpace * maxStackCount + mUnit - tail
             else {
-                float closestBaseItemScale = scale(currPos + 1);
-
-                //调整因为scale导致的left误差
-//                left = (int) (mSpace * maxStackCount + (position - currPos) * mUnit - tail
-//                        -(position - currPos)*(mItemWidth) * (1 - closestBaseItemScale));
-
-                int baseStart = (int) (mSpace * maxStackCount + mUnit - tail + closestBaseItemScale * (mUnit - mSpace) + mSpace);
-                left = (int) (baseStart + (position - currPos - 2) * mUnit - (position - currPos - 2) * (1 - secondaryScale) * (mUnit - mSpace));
+                val closestBaseItemScale = scale(currPos + 1)
+                val baseStart =
+                    (mSpace * maxStackCount + mUnit - tail + closestBaseItemScale * (mUnit - mSpace) + mSpace).toInt()
+                left =
+                    (baseStart + (position - currPos - 2) * mUnit - (position - currPos - 2) * (1 - secondaryScale) * (mUnit - mSpace)).toInt()
             }
-            left = left <= 0 ? 0 : left;
+            left = if (left <= 0) 0 else left
         }
-        return left;
+        return left
     }
 
-
-    @SuppressWarnings("unused")
-    public void setAnimateValue(int animateValue) {
-        this.animateValue = animateValue;
-        int dy = this.animateValue - lastAnimateValue;
-        fill(recycler, direction.layoutDirection * dy, false);
-        lastAnimateValue = animateValue;
+    private fun recycleVertically(view: View?, dy: Int): Boolean {
+        return view != null && (view.top - dy < 0)
     }
 
-    @SuppressWarnings("unused")
-    public int getAnimateValue() {
-        return animateValue;
+    override fun scrollVerticallyBy(dy: Int, recycler: Recycler, state: RecyclerView.State?): Int {
+        return fill(recycler, -dy)
     }
 
-    /**
-     * should recycle view with the given dy or say check if the
-     * view is out of the bound after the dy is applied
-     *
-     * @param view ..
-     * @param dy   ..
-     * @return ..
-     */
-    private boolean recycleHorizontally(View view/*int position*/, int dy) {
-        return view != null && (view.getLeft() - dy < 0 || view.getRight() - dy > getWidth());
-    }
-
-    private boolean recycleVertically(View view, int dy) {
-        return view != null && (view.getTop() - dy < 0 || view.getBottom() - dy > getHeight());
-    }
-
-
-    @Override
-    public int scrollHorizontallyBy(int dx, RecyclerView.Recycler recycler, RecyclerView.State state) {
-        return fill(recycler, dx);
-    }
-
-    @Override
-    public int scrollVerticallyBy(int dy, RecyclerView.Recycler recycler, RecyclerView.State state) {
-        return fill(recycler, dy);
-    }
-
-    @Override
-    public boolean canScrollHorizontally() {
-        return direction == LEFT || direction == RIGHT;
-    }
-
-    @Override
-    public boolean canScrollVertically() {
-        return direction == TOP || direction == BOTTOM;
-    }
-
-    @Override
-    public RecyclerView.LayoutParams generateDefaultLayoutParams() {
-        return new RecyclerView.LayoutParams(RecyclerView.LayoutParams.WRAP_CONTENT, RecyclerView.LayoutParams.WRAP_CONTENT);
-    }
-
-    /**
-     * we need to set scrollstate to {@link RecyclerView#SCROLL_STATE_IDLE} idle
-     * stop RV from intercepting the touch event which block the item click
-     */
-    private void setScrollStateIdle() {
+    private fun setScrollStateIdle() {
         try {
-            if (sSetScrollState == null)
-                sSetScrollState = RecyclerView.class.getDeclaredMethod("setScrollState", int.class);
-            sSetScrollState.setAccessible(true);
-            sSetScrollState.invoke(mRV, RecyclerView.SCROLL_STATE_IDLE);
-        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-            e.printStackTrace();
+            if (sSetScrollState == null) sSetScrollState =
+                RecyclerView::class.java.getDeclaredMethod(
+                    "setScrollState", Int::class.javaPrimitiveType
+                )
+            sSetScrollState!!.isAccessible = true
+            sSetScrollState!!.invoke(mRV, RecyclerView.SCROLL_STATE_IDLE)
+        } catch (e: NoSuchMethodException) {
+            e.printStackTrace()
+        } catch (e: IllegalAccessException) {
+            e.printStackTrace()
+        } catch (e: InvocationTargetException) {
+            e.printStackTrace()
         }
     }
 
-    @Override
-    public void scrollToPosition(int position) {
-        if (position > getItemCount() - 1) {
-            Log.i(TAG, "position is " + position + " but itemCount is " + getItemCount());
-            return;
+    override fun scrollToPosition(position: Int) {
+        if (position > itemCount - 1) {
+            Log.i(
+                TAG, "position is $position but itemCount is $itemCount"
+            )
+            return
         }
-        int currPosition = mTotalOffset / mUnit;
-        int distance = (position - currPosition) * mUnit;
-        int dur = computeSettleDuration(Math.abs(distance), 0);
-        brewAndStartAnimator(dur, distance);
+        val currPosition = mTotalOffset / mUnit
+        val distance = (position - currPosition) * mUnit
+        val dur = computeSettleDuration(abs(distance.toDouble()).toInt(), 0f)
+        brewAndStartAnimator(dur, distance)
     }
 
-    @Override
-    public void requestLayout() {
-        super.requestLayout();
-        initial = false;
+    override fun requestLayout() {
+        super.requestLayout()
+        initial = false
     }
 
-    @SuppressWarnings("unused")
-    public interface CallBack {
-
-        float scale(int totalOffset, int position);
-
-        float alpha(int totalOffset, int position);
-
-        float left(int totalOffset, int position);
+    companion object {
+        private const val TAG = "StackLayoutManager"
     }
 }

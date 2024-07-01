@@ -11,7 +11,6 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_HALF_EXPANDED
 import com.xische.scalableview.adapter.ItemsAdapter
 import com.xische.scalableview.databinding.XischeBottomsheetBinding
-import com.xische.scalableview.utils.Align
 import com.xische.scalableview.utils.Config
 import com.xische.scalableview.utils.StackLayoutManager
 
@@ -46,20 +45,17 @@ class ScalableView @JvmOverloads constructor(
 
     }
 
-    fun addContent(content: View) = binding?.bottomSheet?.run {
-        addView(content)
-    }
-
     fun setAdapter(adapter: ItemsAdapter) = binding?.rv?.let {
-        lm = StackLayoutManager(Config().apply {
-            space = 50
-            maxStackCount = 3
-            initialStackCount = 2
-            scaleRatio = 0.4f
-            secondaryScale = 1f
-            parallex = 2f
-            align = Align.TOP
-        }, it)
+        lm = StackLayoutManager(
+            Config(
+                space = 50,
+                maxStackCount = 3,
+                initialStackCount = 2,
+                scaleRatio = 0.4f,
+                secondaryScale = 1f,
+                parallax = 2f
+            ), it
+        )
         it.adapter = adapter
         it.layoutManager = lm
         it.layoutParams.width = LayoutParams.MATCH_PARENT

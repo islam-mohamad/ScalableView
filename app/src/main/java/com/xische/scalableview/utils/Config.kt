@@ -1,25 +1,17 @@
-package com.xische.scalableview.utils;
+package com.xische.scalableview.utils
 
+import androidx.annotation.FloatRange
+import androidx.annotation.IntRange
 
-import androidx.annotation.FloatRange;
-import androidx.annotation.IntRange;
-
-public class Config {
-
+data class Config(
     @IntRange(from = 2)
-    public int space = 90;
-    public int maxStackCount = 3;
-    public int initialStackCount = 0;
-    @FloatRange(from = 0f, to = 1f)
-    public float secondaryScale;
-    @FloatRange(from = 0f, to = 1f)
-    public float scaleRatio;
-    /**
-     * the real scroll distance might meet requirement,
-     * so we multiply a factor fro parallex
-     */
-    @FloatRange(from = 1f,to = 2f)
-    public float parallex = 1f;
-    public Align align =  Align.RIGHT;
-
-}
+    val space: Int = 90,
+    val maxStackCount: Int = 3,
+    val initialStackCount: Int = 0,
+    @FloatRange(from = 0.0, to = 1.0)
+    val secondaryScale: Float = 0f,
+    @FloatRange(from = 0.0, to = 1.0)
+    val scaleRatio: Float = 0f,
+    @FloatRange(from = 1.0, to = 2.0)
+    val parallax: Float = 1f
+)
